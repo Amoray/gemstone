@@ -11,6 +11,8 @@ $book   ->fname("Douglas")
 		->title("Hitchhiker's Guide to the Galaxy")
 		->price(34.99)
 		->stock(12)
+		->region('Canada', 'United States')
+		->rating('PG')
 ;
 
 G::deposit($book);

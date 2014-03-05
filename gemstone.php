@@ -46,9 +46,10 @@ class G
 		return $stone;
 	}
 
-	static function find()
+	static function find($table, $statement, array $param = array())
 	{
-		
+		// $stone = new stone(self::$db, $table);
+		// $stone->find($statement, $param);
 	}
 
 	static function deposit(stone $stone)
@@ -68,6 +69,7 @@ class stone
 	private 	$table	= null;
 	private		$desc	= null;
 	private		$pri	= null;
+	private		$auto	= null;
 	private 	$attach = array();
 
 	public function __call($name, $attributes)
@@ -84,20 +86,11 @@ class stone
 
 	public function __set($name, $attr)
 	{
-		if (is_array($attr)) 
+		// All __set $attr values are arrays, reduce single arrays to values
+		// Makes ->var(1,2,3) functionally equivalent to ->var(array(1,2,3))
+		if (is_array($attr) && count($attr) == 1) 
 		{
-			if (count($attr) == 1) 
-			{
-				$attr = reset($attr);
-			}
-			else
-			{
-				$attr = json_encode($attr);
-			}
-		}
-		elseif (is_object($attr)) 
-		{
-			$attr = serialize($attr);
+			$attr = reset($attr);
 		}
 		$this->attach[$name] = $attr;
 		return $this;
@@ -126,6 +119,19 @@ class stone
 			}
 			return false;
 		});
+		$this->pri = reset($this->pri);
+
+		$this->auto = array_filter($this->desc, function ($value)
+		{
+			if (array_key_exists('Extra', $value) && $value['Extra'] == "auto_increment") 
+			{
+				return true;
+			}
+			return false;
+		});
+		$this->auto = reset($this->auto);
+
+		echo "<pre>"; var_dump($this->pri, $this->auto); echo "</pre>";
 	}
 
 	public function mine()
@@ -140,12 +146,52 @@ class stone
 	public function deposit()
 	{
 		$attach = $this->attach;
+		$pri = $this->pri;
+		$auto = $this->auto;
 		echo "<pre>"; var_dump($this->attach); echo "</pre>";
-		list($field, $values) = array_map(function ($value) use ($attach)
+		
+		$map = array_map(function ($value) use ($attach)
 		{
-			return array($value['Field'], $attach[$value['Field']]);
+			// Skip as no value is attached
+			if (array_key_exists($value['Field'], $attach)) 
+			{
+				if (preg_match('/set\((.*)\)/', $value['Field'], $match) && is_array($attach[ $value['Field'] ])) 
+				{
+					// Look for sets and format value to correct type
+					$attach[ $value['Field'] ] == implode(',', $match[1]);
+				}
+				elseif (is_array($attach[ $value['Field'] ])) 
+				{
+					// Encode arrays for storage
+					$attach[ $value['Field'] ] == json_encode($attach[ $value['Field'] ]);
+				}
+				elseif (is_object($attach[ $value['Field'] ])) 
+				{
+					// Encode objects for storage
+					$attach[ $value['Field'] ] == serialize($attach[ $value['Field'] ]);
+				}
+				return array($value['Field'], $attach[ $value['Field'] ]);
+			}
 		}, $this->desc);
-		echo "<pre>"; var_dump($field, $value); echo "</pre>";
+
+		$map = array_filter($map, function ($value) use ($pri, $auto)
+		{
+			// if $value is empty
+			// if $value's first is empty and field is primary or auto_increment
+			if (empty($value) || 
+				(
+					empty($value[0]) && 
+					(
+						$pri['Field'] == $value[0] || $auto['Field'] == $value[0]
+					)
+				)
+			)
+			{
+				return false;
+			}
+			return true;
+		});
+		echo "<pre>"; var_dump($map); echo "</pre>";
 	}	
 }
 
