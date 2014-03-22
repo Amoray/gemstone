@@ -13,7 +13,22 @@ $book   ->fname("Douglas")
 		->stock(12)
 		->region('Canada', 'United States')
 		->rating('PG')
+		// ->extra('test')
 ;
+
+$booktwo = G::mine('books');
+
+$booktwo   ->fname("Douglas")
+		->lname("Adams")
+		->title("Derk Gently's Holistic Detective Agency")
+		->price(34.99)
+		->stock(12)
+		->region('Canada')
+		->rating('PG')
+		->extra('test')
+;
+
+$book->sync($booktwo);
 
 G::deposit($book);
 

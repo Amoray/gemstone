@@ -71,6 +71,7 @@ class stone
 	private		$pri	= null;
 	private		$auto	= null;
 	private 	$attach = array();
+	private		$sync	= array();
 
 	public function __call($name, $attributes)
 	{
@@ -131,7 +132,6 @@ class stone
 		});
 		$this->auto = reset($this->auto);
 
-		echo "<pre>"; var_dump($this->pri, $this->auto); echo "</pre>";
 	}
 
 	public function mine()
@@ -143,34 +143,96 @@ class stone
 	{
 	}
 
+	public function sync(stone $stone)
+	{
+		$this->sync[] = $stone;
+	}
+
 	public function deposit()
+	{
+		try 
+		{
+			$this->db->beginTransaction();
+			
+			list($prepare, $values) = $this->insertinto();
+			$statement = $this->db->prepare($prepare);
+			$statement->execute($values);
+
+			foreach ($this->sync as $substone) 
+			{
+				list($prepare, $values) = $substone->insertinto();
+				$statement = $this->db->prepare($prepare);
+				$statement->execute($values);
+			}
+
+			$this->db->commit();
+		} 
+		catch (\PDOException $e) 
+		{
+			echo "<pre>"; var_dump($test); echo "</pre>";
+			$this->db->rollBack();
+			echo $e->getMessage();
+		}
+	}
+
+	public function insertinto()
 	{
 		$attach = $this->attach;
 		$pri = $this->pri;
 		$auto = $this->auto;
-		echo "<pre>"; var_dump($this->attach); echo "</pre>";
-		
+
+		// Need to reverse this so that we can throw an error whenever we try to write a column that does not exist.
+		$desc = array_reduce($this->desc, function ($output, $input)
+		{
+			$output[] = $input['Field'];
+			return $output;
+		}, array());
+
+		// Master Exception
+		$exception = new GemstoneException('Parent');
+
+
+		// Overloading Database Detection
+		$overloading = array_diff(array_keys($attach), $desc);
+		if (count($overloading)) 
+		{
+			foreach ($overloading as $value) 
+			{
+				$exception->add(new GemstoneException("Unknown column {$value}"));
+			}
+		}
+
+		if ($exception->toThrow()) 
+		{
+			throw $exception;
+		}
+
 		$map = array_map(function ($value) use ($attach)
 		{
 			// Skip as no value is attached
 			if (array_key_exists($value['Field'], $attach)) 
 			{
-				if (preg_match('/set\((.*)\)/', $value['Field'], $match) && is_array($attach[ $value['Field'] ])) 
+				if (preg_match('/set\((.*)\)/', $value['Type'], $match) && is_array($attach[ $value['Field'] ])) 
 				{
 					// Look for sets and format value to correct type
-					$attach[ $value['Field'] ] == implode(',', $match[1]);
+					$attach[ $value['Field'] ] = implode(',', $attach[ $value['Field'] ]);
 				}
 				elseif (is_array($attach[ $value['Field'] ])) 
 				{
 					// Encode arrays for storage
-					$attach[ $value['Field'] ] == json_encode($attach[ $value['Field'] ]);
+					$attach[ $value['Field'] ] = json_encode($attach[ $value['Field'] ]);
 				}
 				elseif (is_object($attach[ $value['Field'] ])) 
 				{
 					// Encode objects for storage
-					$attach[ $value['Field'] ] == serialize($attach[ $value['Field'] ]);
+					$attach[ $value['Field'] ] = serialize($attach[ $value['Field'] ]);
 				}
 				return array($value['Field'], $attach[ $value['Field'] ]);
+				// return $attach[ $value['Field'] ];
+			}
+			else
+			{
+				// throw new GemstoneException("Unknown column `{$value['Field']}` in `{$this->table}`");
 			}
 		}, $this->desc);
 
@@ -191,8 +253,53 @@ class stone
 			}
 			return true;
 		});
-		echo "<pre>"; var_dump($map); echo "</pre>";
-	}	
+
+		// Get Fields for insert
+		$fields = array_reduce($map, function ($output, $input)
+		{
+			$output[] = $input[0];
+			return $output;
+		}, array());
+
+		// Get Values for insert
+		$values = array_reduce($map, function ($output, $input)
+		{
+			$output[] = $input[1];
+			return $output;
+		}, array());
+
+
+		$prepare = 
+				"INSERT INTO `{$this->table}` (`". 
+					implode('`, `', $fields) 
+				."`) VALUES (". 
+					implode(', ', array_fill(0, count($fields), '?')) 
+				.")";
+		return array($prepare, $values);
+	}
+}
+
+/**
+* Database Exceptions
+*/
+class GemstoneException extends \PDOException
+{
+	private $children = array();
+
+	public function __construct($message, $code = 0, \Exception $previous = null)
+	{
+		parent::__construct("Gemstone Error: ". $message, $code, $previous);
+	}
+
+	public function add(GemstoneException $exception)
+	{
+		$this->children[] = $exception;
+	}
+
+	public function toThrow()
+	{
+		return !empty($this->children);
+	}
 }
 
 ?>
